@@ -1,4 +1,4 @@
-from tkinter import messagebox, scrolledtext, simpledialog
+from tkinter import messagebox, scrolledtext, simpledialog, filedialog
 
 import tkinter as tk
 import classes.client as client
@@ -54,7 +54,7 @@ class P2pChat(tk.Frame):
             msg = "port must be an integer where 1024 < port <= 65535"
             self.show_sys_msg(msg)
             return
-  
+
         try:
             self.chat = client.Client(host_ip, int(port_entry_val))
             self.connect_btn.pack_forget()
@@ -63,7 +63,7 @@ class P2pChat(tk.Frame):
         except Exception as e:
             msg = "Check the ip and port. Check host's firewall settings"
             self.show_sys_msg(repr(e) + '\n' + msg)
-   
+
     def validate_ip(self, ip):
         parts = ip.split('.')
         if len(parts) != 4:
@@ -95,7 +95,7 @@ class P2pChat(tk.Frame):
         
         menu = tk.Menu(menubar, tearoff=0)
         menu.add_command(label="Change user name", \
-                         command=self.prompt_new_name)
+                        command=self.prompt_new_name)
         menu.add_separator()
         menu.add_command(label="Exit", command=self.close_app)
         menubar.add_cascade(label="Menu", menu=menu)
@@ -112,9 +112,9 @@ class P2pChat(tk.Frame):
         
         ip_label = tk.Label(ip_frame, text="ip:")
         ip_label.pack(side=tk.LEFT)
-       
+    
         vcmd = (self.register(self.validate_entry_len), '%P', '%W')
-       
+    
         ip_max_len = 15
         ip_entry = tk.Entry(ip_frame, width=ip_max_len, \
                             validate='key', vcmd=vcmd)
@@ -131,7 +131,7 @@ class P2pChat(tk.Frame):
 
         port_max_len = 5
         port_entry = tk.Entry(port_frame, width=port_max_len, \
-                              validate='key', vcmd=vcmd)
+                            validate='key', vcmd=vcmd)
         port_entry.pack(side=tk.LEFT)
         port_entry.insert(0, DEFAULT_PORT)
         self.port_entry = port_entry
@@ -139,7 +139,7 @@ class P2pChat(tk.Frame):
         # Host Instruction Label
         self.host_instr_label = tk.Label(ip_port_frame, \
             text="<-- Tell your friend this ip and port")
-       
+    
         # msg dialogue and entry frame 
         msg_frame = tk.Frame(self)
         msg_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
@@ -176,6 +176,37 @@ class P2pChat(tk.Frame):
         min_height = master.winfo_height() + temporary_menubar_height
         master.minsize(master.winfo_width(), min_height)
 
+        # Кнопка для выбора файла
+        choose_file_btn = tk.Button(msg_entry_frame)
+        choose_file_btn["text"] = "Choose File"
+        choose_file_btn["command"] = self.choose_file
+        choose_file_btn.pack(side=tk.LEFT)
+
+        send_file_btn = tk.Button(msg_entry_frame)
+        send_file_btn["text"] = "Send File"
+        send_file_btn["command"] = self.choose_and_send_file
+        send_file_btn.pack(side=tk.LEFT)
+
+    def choose_file(self):
+        file_path = filedialog.askopenfilename()
+        if file_path:
+            self.file_path = file_path
+            messagebox.showinfo("File Selected", f"Selected file: {file_path}"
+                                
+    def send_file(self):
+        if hasattr(self, 'file_path'):
+            if self.chat is not None:
+                self.chat.send_msg("/file " + self.file_path)
+                messagebox.showinfo("File Sent", f"File sent: {self.file_path}")
+                del self.file_path
+        else:
+            messagebox.showerror("No File Selected", "Please select a file before sending.")
+
+    def choose_and_send_file(self):
+        file_path = filedialog.askopenfilename()
+        if file_path:
+            self.send_file(file_path)
+
     def remove_host_instr(self, event=None):
         if self.host_instr_label is not None:
             self.host_instr_label.pack_forget()
@@ -196,7 +227,11 @@ class P2pChat(tk.Frame):
         if self.chat is not None:
             msgs = self.chat.get_new_msgs()
             for msg in msgs:
-                self.display_msg(msg)
+                if msg.startswith("SYSTEM: /file "):  # Если получено сообщение о файле
+                    file_path = msg[14:]  # Получаем путь к файлу
+                    self.display_msg("Received file: " + file_path)
+                else:  # В противном случае отображаем текстовое сообщение
+                    self.display_msg(msg)
         self.master.after(100, self.display_new_msg)
 
     def display_msg(self, msg):
@@ -208,8 +243,13 @@ class P2pChat(tk.Frame):
     def send_msg(self, event=None):
         if self.chat is not None:
             msg = self.msg_entry.get()
-            self.msg_entry.delete(0, tk.END)
-            self.chat.send_msg(msg)
+            if msg.startswith("/file "):  # Если сообщение начинается с "/file ", значит отправляем файл
+                file_path = msg[6:]  # Получаем путь к файлу
+                self.msg_entry.delete(0, tk.END)
+                self.send_file(file_path)
+            else:  # В противном случае отправляем текстовое сообщение
+                self.msg_entry.delete(0, tk.END)
+                self.chat.send_msg(msg)
 
     def validate_entry_len(self, P, W):
         entry = self.master.nametowidget(W)

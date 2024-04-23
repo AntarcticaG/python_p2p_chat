@@ -10,6 +10,7 @@ import sys
 class Server(scb.ServerClientBase):
     MAX_U_NAME_LEN = 16
     MIN_U_NAME_LEN = 4
+    FILE_MESSAGE_TYPE = 4
 
     def __init__(self, port):
         super().__init__()
@@ -26,7 +27,6 @@ class Server(scb.ServerClientBase):
         self._users = {}
         self._host_user = User(self._s, ip, port, "Host")
         self._system_user = User(self._s, ip, port, "SYSTEM")
-       
         self._lock = threading.Lock()
         th = threading.Thread(target=self.new_conn_handler)
         th.start()
@@ -38,7 +38,7 @@ class Server(scb.ServerClientBase):
     @property
     def host_port(self):
         return self._host_user.port
-   
+    
     def new_conn_handler(self):
         while True:
             try:
@@ -61,6 +61,18 @@ class Server(scb.ServerClientBase):
                 
                 self.send_msg_as_sys_to_user(repr(e), self._host_user)
 
+    def send_file_to_all(self, file_data):
+        # Отправляем файл каждому пользователю
+        with self._lock:
+            for user in self._users.values():
+                try:
+                    # Отправляем сообщение о типе файла
+                    self.send_msg_to_user(str(self.FILE_MESSAGE_TYPE), user)
+                    # Отправляем файл
+                    self.send_msg_to_user(file_data, user)
+                except Exception as e:
+                    self.send_msg_as_sys_to_user(repr(e), self._host_user)
+
     # This function is the function that gets called when GUI presses send btn
     def send_msg(self, msg):
         if not msg:
@@ -71,6 +83,8 @@ class Server(scb.ServerClientBase):
         with self._lock:
             if msg_type == 2:
                 self.change_user_name(self._host_user, msg[4:])
+            elif msg_type == self.FILE_MESSAGE_TYPE:
+                self.send_file_to_all(msg)
             else:
                 self.send_msg_as_user_to_all(msg, self._host_user)
 
@@ -142,6 +156,8 @@ class Server(scb.ServerClientBase):
                         break
                     elif msg_type == 2:
                         self.change_user_name(user, msg[4:])
+                    elif msg_type == self.FILE_MESSAGE_TYPE:
+                        self.send_file_to_all(msg)
                     else:
                         self.send_msg_as_user_to_all(msg, user)
             except Exception as e:

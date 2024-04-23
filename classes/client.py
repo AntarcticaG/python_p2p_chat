@@ -6,6 +6,7 @@ import socket
 
 
 class Client(scb.ServerClientBase):
+
     def __init__(self, host_ip, port):
         super().__init__()
 
@@ -22,17 +23,21 @@ class Client(scb.ServerClientBase):
             try:
                 msg = sock.recv(1024)
                 msg = msg.decode()
-                if not msg:
-                    self.show_sys_msg("Host is disconnected")
-                    self.destroy()
-                    break
+                msg_type = self.determine_msg_type(msg)
 
-                self._msg_queue.put(msg)
+                if msg_type == self.FILE_MESSAGE_TYPE:
+                    # Получаем файл
+                    file_data = sock.recv(1024)
+                    file_path = os.path.join(os.getcwd(), 'received_file.txt')
+                    with open(file_path, 'wb') as file:
+                        file.write(file_data)
+                    self.show_sys_msg("File received and saved as 'received_file.txt'")
+                else:
+                    self._msg_queue.put(msg)
             except Exception as e:
                 if e.errno == EBADF: 
                     # User closed the program
                     break
-
                 self.show_sys_msg(repr(e))
 
     def send_msg(self, msg):
@@ -44,6 +49,15 @@ class Client(scb.ServerClientBase):
                 self._s.sendall(msg.encode())
             else:
                 self._msg_queue.put(msg)
+        except Exception as e:
+            self.show_sys_msg(repr(e))
+
+    def send_file(self, file_path):
+        try:
+            with open(file_path, 'rb') as file:
+                file_data = file.read()
+                self.send_msg(str(self.FILE_MESSAGE_TYPE))
+                self.send_msg(file_data)
         except Exception as e:
             self.show_sys_msg(repr(e))
     
