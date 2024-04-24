@@ -4,7 +4,7 @@ from errno import ECONNABORTED, EBADF
 import classes.server_client_base as scb
 import threading
 import socket
-import sys
+import os
 
 
 class Server(scb.ServerClientBase):
@@ -61,17 +61,63 @@ class Server(scb.ServerClientBase):
                 
                 self.send_msg_as_sys_to_user(repr(e), self._host_user)
 
-    def send_file_to_all(self, file_data):
-        # Отправляем файл каждому пользователю
+    def send_file(self, file_path):
         with self._lock:
             for user in self._users.values():
                 try:
+                    # Открываем файл в бинарном режиме для чтения
+                    with open(file_path, "rb") as file:
+                        # Читаем данные файла
+                        file_data = file.read()
+
                     # Отправляем сообщение о типе файла
                     self.send_msg_to_user(str(self.FILE_MESSAGE_TYPE), user)
-                    # Отправляем файл
+                    # Отправляем имя файла
+                    self.send_msg_to_user(os.path.basename(file_path), user)
+                    # Отправляем содержимое файла
                     self.send_msg_to_user(file_data, user)
                 except Exception as e:
                     self.send_msg_as_sys_to_user(repr(e), self._host_user)
+
+    
+    def receive_file_data(self, client_socket, filename):
+        try:
+            # Создаем директорию для сохранения файлов, если ее еще нет
+            save_path = "received_files"
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
+
+            # Полный путь к файлу
+            file_path = os.path.join(save_path, filename)
+
+            # Открываем файл для записи в бинарном режиме
+            with open(file_path, "wb") as file:
+                while True:
+                    # Принимаем данные файла от клиента
+                    file_data = client_socket.recv(1024)
+                    if not file_data:
+                        break
+                    # Записываем данные в файл
+                    file.write(file_data)
+
+            # Оповещаем пользователей о успешном получении файла
+            self.send_msg_to_all(f"SYSTEM: File '{filename}' received and saved.", sender=None)
+        except Exception as e:
+            self.send_msg_as_sys_to_user(f"Error receiving file: {e}", self._host_user)
+    
+    def handle_file_msg(self, filename):
+        try:
+            # Получаем данные файла от клиента
+            file_data = self.recv_msg()
+            # Сохраняем данные в файле с именем filename
+            with open(filename, "wb") as file:
+                file.write(file_data)
+            # Возвращаем путь к сохраненному файлу
+            return filename
+        except Exception as e:
+            # Обрабатываем ошибки
+            print("Error handling file:", e)
+            return None
 
     # This function is the function that gets called when GUI presses send btn
     def send_msg(self, msg):
@@ -84,7 +130,7 @@ class Server(scb.ServerClientBase):
             if msg_type == 2:
                 self.change_user_name(self._host_user, msg[4:])
             elif msg_type == self.FILE_MESSAGE_TYPE:
-                self.send_file_to_all(msg)
+                self.send_file(msg)
             else:
                 self.send_msg_as_user_to_all(msg, self._host_user)
 
@@ -139,13 +185,22 @@ class Server(scb.ServerClientBase):
         # To ensure what I see is what they see
         self._msg_queue.put(msg)
 
-    def send_msg_to_user(self, msg, to_user):
-        to_user.sock.sendall(msg.encode())
+    def send_msg_to_user(self, message, to_user):
+        try:
+            if isinstance(message, str):
+                to_user.sock.sendall(message.encode())
+            elif isinstance(message, bytes):
+                to_user.sock.sendall(message)
+            else:
+                raise ValueError("Unsupported message type")
+        except Exception as e:
+            self.send_msg_as_sys_to_user(repr(e), self._host_user)
 
     def recv_handler(self, sock):
         while True:
             try:
                 msg = sock.recv(1024)
+                print("Received message:", msg)
                 msg = msg.decode()
                 msg_type = self.determine_msg_type(msg)
 
@@ -157,14 +212,42 @@ class Server(scb.ServerClientBase):
                     elif msg_type == 2:
                         self.change_user_name(user, msg[4:])
                     elif msg_type == self.FILE_MESSAGE_TYPE:
-                        self.send_file_to_all(msg)
+                        filename = msg[len("/file "):]
+                        file_data = b""
+                        print("Receiving file:", filename)
+                        while True:
+                            chunk = sock.recv(1024)
+                            if not chunk:
+                                break
+                            file_data += chunk
+                            print("Received chunk:", len(chunk)) 
+                            print(filename)
+                        print("----")
+                        self.save_received_file(filename, file_data)
+                        print("----")
                     else:
                         self.send_msg_as_user_to_all(msg, user)
             except Exception as e:
-                if e.errno == EBADF:    
-                    # User closed the program
+                if isinstance(e, OSError) and e.errno == EBADF:
                     break
                 self.send_msg_as_sys_to_user(repr(e), self._host_user)
+
+
+    def save_received_file(self, filename, file_data):
+        try:
+            print(filename)
+            save_path = os.path.join("received_files", filename)
+
+            # Создаем директорию для сохранения файла, если её нет
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+            # Сохраняем файл
+            with open(save_path, "wb") as file:
+                file.write(file_data)
+
+            print(f"File '{filename}' saved successfully.")
+        except Exception as e:
+            print(f"Error saving file '{filename}': {e}")
 
     def determine_msg_type(self, msg):
         if not msg:
@@ -172,6 +255,9 @@ class Server(scb.ServerClientBase):
 
         if len(msg) >= 5 and msg[:4] == "/nc ":
             return 2
+        
+        if "/file" in msg:
+            return 4
 
         return 3
 
@@ -194,7 +280,7 @@ class Server(scb.ServerClientBase):
         
         if not self.validate_user_name(new_user_name):
             msg = "User name length must be between " + \
-                  str(self.MIN_U_NAME_LEN) + " and " + str(self.MAX_U_NAME_LEN)
+                    str(self.MIN_U_NAME_LEN) + " and " + str(self.MAX_U_NAME_LEN)
             self.send_msg_as_sys_to_user(msg, requested_user)
             return
         
@@ -205,7 +291,7 @@ class Server(scb.ServerClientBase):
         # Host user and System user are not in the self._users dict
         name_taken = False
         if new_user_name == self._host_user.name or \
-           new_user_name == self._system_user.name:
+            new_user_name == self._system_user.name:
             name_taken = True
 
         if not name_taken:

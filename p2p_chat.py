@@ -4,6 +4,7 @@ import tkinter as tk
 import classes.client as client
 import classes.server as server
 import sys
+import os
 
 
 DEFAULT_PORT = 10000
@@ -176,36 +177,30 @@ class P2pChat(tk.Frame):
         min_height = master.winfo_height() + temporary_menubar_height
         master.minsize(master.winfo_width(), min_height)
 
-        # Кнопка для выбора файла
-        choose_file_btn = tk.Button(msg_entry_frame)
-        choose_file_btn["text"] = "Choose File"
-        choose_file_btn["command"] = self.choose_file
-        choose_file_btn.pack(side=tk.LEFT)
-
         send_file_btn = tk.Button(msg_entry_frame)
         send_file_btn["text"] = "Send File"
         send_file_btn["command"] = self.choose_and_send_file
         send_file_btn.pack(side=tk.LEFT)
-
-    def choose_file(self):
-        file_path = filedialog.askopenfilename()
-        if file_path:
-            self.file_path = file_path
-            messagebox.showinfo("File Selected", f"Selected file: {file_path}"
                                 
-    def send_file(self):
-        if hasattr(self, 'file_path'):
+    def send_file(self, file_path, filename):
+        try:
+            with open(file_path, "rb") as file:
+                data = file.read()
+
             if self.chat is not None:
-                self.chat.send_msg("/file " + self.file_path)
-                messagebox.showinfo("File Sent", f"File sent: {self.file_path}")
-                del self.file_path
-        else:
-            messagebox.showerror("No File Selected", "Please select a file before sending.")
+                self.chat.send_msg("/file " + filename)  # Отправляем сообщение о начале передачи файла с его именем
+                self.chat.send_msg(data)  # Отправляем данные файла
+            else:
+                self.show_sys_msg("Cannot send file: not connected to server")
+        except Exception as e:
+            self.show_sys_msg("Error sending file: " + str(e))
 
     def choose_and_send_file(self):
         file_path = filedialog.askopenfilename()
         if file_path:
-            self.send_file(file_path)
+            # Вызываем метод send_file() клиента с выбранным путем к файлу
+            self.chat.send_file(file_path)  # Передаем путь к файлу и его имя в метод send_file
+
 
     def remove_host_instr(self, event=None):
         if self.host_instr_label is not None:
@@ -227,10 +222,10 @@ class P2pChat(tk.Frame):
         if self.chat is not None:
             msgs = self.chat.get_new_msgs()
             for msg in msgs:
-                if msg.startswith("SYSTEM: /file "):  # Если получено сообщение о файле
-                    file_path = msg[14:]  # Получаем путь к файлу
+                if msg.startswith("SYSTEM: /file "):
+                    file_path = msg[14:]
                     self.display_msg("Received file: " + file_path)
-                else:  # В противном случае отображаем текстовое сообщение
+                else:
                     self.display_msg(msg)
         self.master.after(100, self.display_new_msg)
 
@@ -243,11 +238,12 @@ class P2pChat(tk.Frame):
     def send_msg(self, event=None):
         if self.chat is not None:
             msg = self.msg_entry.get()
-            if msg.startswith("/file "):  # Если сообщение начинается с "/file ", значит отправляем файл
-                file_path = msg[6:]  # Получаем путь к файлу
+            if msg.startswith("/file "):
+                file_path = msg[6:]
                 self.msg_entry.delete(0, tk.END)
-                self.send_file(file_path)
-            else:  # В противном случае отправляем текстовое сообщение
+                # Вызываем метод send_file() клиента с путем к файлу
+                self.chat.send_file(file_path)
+            else:
                 self.msg_entry.delete(0, tk.END)
                 self.chat.send_msg(msg)
 
